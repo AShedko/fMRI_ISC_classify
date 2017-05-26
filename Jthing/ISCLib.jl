@@ -1,11 +1,10 @@
 module ISCLib
 
-using Formatting, Stats, NIfTI
-# const PATH = "/home/ashedko/Projects/UIR/fmri/classify/CogVis_4trofimov/{1:d}/fmri/"
-# const PATH = "/run/media/ashedko/5cdd1287-7dba-4138-8a1b-91148f9f8ab5/ashedko/CogVis_4trofimov/{1:d}/fmri/"
-# const PATH = "/run/media/ashedko/TOSHIBA EXT/UNC/{1:d}/"
-const PATH = "/run/media/ashedko/5cdd1287-7dba-4138-8a1b-91148f9f8ab5/ashedko/UNC/{1:d}/"
-const PATH_Fmt = x -> format( PATH , x)
+using Stats, NIfTI, Logging, ExcelReaders, DataFrames
+@Logging.configure(level=DEBUG)
+
+const PATH = "/run/media/ashedko/5cdd1287-7dba-4138-8a1b-91148f9f8ab5/ashedko/UNC/"
+const PATH_Fmt = x -> PATH * string(x) * "/"
 const NSUBJ = 29 # 7 in test runs
 const SIZEX = 91
 const SIZEY = 109
@@ -13,10 +12,31 @@ const SIZEZ = 91
 const SHAPE = (SIZEX,SIZEY,SIZEZ)
 const SIZE = SIZEX * SIZEY * SIZEZ
 const LEN = 3620
-export NSUBJ, SHAPE, SIZE, get_niis, cor_n, cov_n, rema!, LEN
+const NEXP = 91
+export NSUBJ, SHAPE, SIZE, get_nii,
+      get_niis, cov_n!, rema!, LEN,
+      prep, triangular_index, ISC_res,
+      get_indexes, NEXP
 
-function get_nii(subj::Int, rng::AbstractArray)
-    return niread(joinpath(PATH_Fmt(subj),FNAMES[subj][ind]),mmap= true)
+macro s_str(s)
+  Expr(:quote, symbol(s))
+end
+
+"""
+# indexes for the end of response for each question
+# i - Subject_id
+"""
+function get_indexes(i::Int64, t::Array{String,1} = ["S1","S2","S3","S4"])
+    data = readxl(DataFrame,joinpath(PATH,"logs","$i.xlsx"), "Лист1!A1:G$(NEXP+1)");
+    data = data[reduce(|,data[:Stimul_1] .== w for w in t),:]
+    ind_end = data[:Response]
+    # map(Int,(ceil(hcat(ind_end-minimum(data[Symbol("Stim dur")]),ind_end))*2)) #ceil returns float64
+    map(Int,(ceil(hcat(ind_end-10,ind_end))*2))
+end
+
+function get_nii(subj::Int, ind::Int)
+    fnames = readdir(PATH_Fmt(subj))
+    return niread(joinpath(PATH_Fmt(subj),fnames[ind]),mmap= true)
 end
 
 function get_niis(subj::Int, rng::AbstractArray=1:LEN)
@@ -24,51 +44,60 @@ function get_niis(subj::Int, rng::AbstractArray=1:LEN)
     return [niread(joinpath(PATH_Fmt(subj),fnames[ind]),mmap= true) for ind in rng]
 end
 
-function rema!(shadow::Array, variable::Array,decay::Float64= 0.3)
-    shadow -= (1 - decay) * (shadow - variable)
+@inline function rema!(shadow::Array, variable::Array,decay::Float64= 0.3)
+    shadow .-= (1 - decay) * (shadow - variable)
 end
 
 function prep(subj::Int64)
-  seq = get_niis(subj,1:LEN)
-  m = mean(seq)
-  niwrite(joinpath(PATH_Fmt(subj),"mean.nii"),m)
+  @debug("mean",subj)
+  if isfile(joinpath(PATH_Fmt(subj),"mean.nii"))
+    return niread(joinpath(PATH_Fmt(subj),"mean.nii"))
+  else
+    seq = get_niis(subj,1:LEN)
+    m = mean(seq)
+    ni = NIfTI.NIVolume(seq[1].header, seq[1].extensions, m)
+    niwrite(joinpath(PATH_Fmt(subj),"mean.nii"), ni)
+  end
   m
 end
 
-function cov_n(seq::AbstractArray,means::AbstractArray,indexes::AbstractArray=1:LEN)
-  srol = [seq[i][indexes[1]].raw - means[i] for i in 1:length(seq)]
-  n_sub = length(seq)
-  covs = zeros(SIZE,n_sub, n_sub) # ковариационные матрицы
-  ds = [zeros(SIZE) for i in 1:n_sub]
-  @sync @parallel for i in indexes[2:end]
-      @simd for ind in 1:n_sub
-          srol[ind] = rema!(srol[ind],seq[ind][i].raw - means[ind])
+function triangular_index(i::Int,j::Int)
+  (NSUBJ*(NSUBJ-1)>>1) - (NSUBJ-i)*((NSUBJ-i)-1)>>1 + j - i - 1
+end
+
+function reverse_tri_index(k::Int)
+  i = NSUBJ - 2 - floor(sqrt(-8*k + 4*NSUBJ*(NSUBJ-1)-7)/2.0 - 0.5)
+  j = k + i + 1 - NSUBJ*(NSUBJ-1)>>1 + (NSUBJ-i)*((NSUBJ-i)-1)>>1
+  i,j
+end
+
+function cov_n!(covs::Array{Float64,2},ds::Array{Float64,2},seq::AbstractArray,means::AbstractArray,lim::Int64)
+  info("cov_n called")
+  srol = [seq[i][1].raw - means[i] for i in 1:NSUBJ  ]
+  for i in 2:lim
+      @simd for ind in 1:NSUBJ
+          srol[ind] .= rema!(srol[ind],seq[ind][i].raw - means[ind])
           # in-place Фильтр Брауна по 1 аргументу ( x = (1-δ)x + χ, χ - new x )
-          @inbounds ds[ind] += reshape(srol[ind] .^2, SIZE)
+          @inbounds ds[:,ind] .+= reshape(srol[ind] .^2, SIZE)
       end
-      @simd for k in 1:n_sub
-          for j in k+1:n_sub
-              covs[:,k,j] += reshape(srol[j] .* srol[k], SIZE)
+      @simd for j in 1:NSUBJ-1
+          for k in j+1:NSUBJ
+              # info(i,j,k,"  ",triangular_index(j,k))
+              @inbounds covs[:,triangular_index(j,k)] .+= reshape(srol[j] .* srol[k], SIZE)
           end
       end
   end
-  covs,ds
 end
 
-function cor_n(means::AbstractArray,indexes::AbstractArray=1:LEN)
-    covs,ds = cov_n(seq,means,indexes)
-    corrmats = zeros(covs)
-    n_sub = length(seq)
+function ISC_res(covs::Array{Float64,2},ds::Array{Float64,2})
+    res = zeros(SIZE)
     for i in 1:SIZE
-        corrmats[i,:,:] = eye(n_sub)
-        for j in 1:(n_sub-1)
-            for k in (j+1):n_sub
-                corrmats[i,j,k] = covs[i,j,k]/sqrt(ds[j][i]*ds[k][i])
-                corrmats[i,k,j] = corrmats[i,j,k]
-            end
-        end
+      for j in 1:(NSUBJ-1) for k in (j+1):NSUBJ
+          res[i] += covs[i,triangular_index(j,k)]/sqrt(ds[i,j]*ds[i,k])
+      end end
+      res[i] /= (NSUBJ*(NSUBJ-1))
     end
-    corrmats,ds
+    res
 end
 
 end
