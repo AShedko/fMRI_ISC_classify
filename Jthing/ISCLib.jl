@@ -31,7 +31,7 @@ function get_indexes(i::Int64, t::Array{String,1} = ["S1","S2","S3","S4"])
     data = data[reduce(|,data[:Stimul_1] .== w for w in t),:]
     ind_end = data[:Response]
     # map(Int,(ceil(hcat(ind_end-minimum(data[Symbol("Stim dur")]),ind_end))*2)) #ceil returns float64
-    map(Int,(ceil(hcat(ind_end-10,ind_end))*2))
+    map(Int,(ceil(hcat(ind_end-6,ind_end+2))*2))[1:end-1,:]
 end
 
 function get_nii(subj::Int, ind::Int)
@@ -62,13 +62,13 @@ function prep(subj::Int64)
 end
 
 function triangular_index(i::Int,j::Int)
-  (NSUBJ*(NSUBJ-1)>>1) - (NSUBJ-i)*((NSUBJ-i)-1)>>1 + j - i - 1
+  Int(round(j * (j - 3) / 2 + i + 1))
 end
 
 function reverse_tri_index(k::Int)
-  i = NSUBJ - 2 - floor(sqrt(-8*k + 4*NSUBJ*(NSUBJ-1)-7)/2.0 - 0.5)
-  j = k + i + 1 - NSUBJ*(NSUBJ-1)>>1 + (NSUBJ-i)*((NSUBJ-i)-1)>>1
-  i,j
+  j = round(floor(-.5 + .5 * sqrt(1 + 8 * (k - 1))) + 2);
+  i = round(j * (3 - J) / 2 + k - 1);
+  Int(i),Int(j)
 end
 
 function cov_n!(covs::Array{Float64,2},ds::Array{Float64,2},seq::AbstractArray,means::AbstractArray,lim::Int64)
@@ -80,22 +80,21 @@ function cov_n!(covs::Array{Float64,2},ds::Array{Float64,2},seq::AbstractArray,m
           # in-place Фильтр Брауна по 1 аргументу ( x = (1-δ)x + χ, χ - new x )
           @inbounds ds[:,ind] .+= reshape(srol[ind] .^2, SIZE)
       end
-      @simd for j in 1:NSUBJ-1
-          for k in j+1:NSUBJ
+      @simd for k in 2:NSUBJ for j in 1:k-1
               # info(i,j,k,"  ",triangular_index(j,k))
               @inbounds covs[:,triangular_index(j,k)] .+= reshape(srol[j] .* srol[k], SIZE)
-          end
-      end
+      end end
   end
 end
 
 function ISC_res(covs::Array{Float64,2},ds::Array{Float64,2})
     res = zeros(SIZE)
     for i in 1:SIZE
-      for j in 1:(NSUBJ-1) for k in (j+1):NSUBJ
+
+      for k in 2:NSUBJ for j in 1:k-1
           res[i] += covs[i,triangular_index(j,k)]/sqrt(ds[i,j]*ds[i,k])
       end end
-      res[i] /= (NSUBJ*(NSUBJ-1))
+      res[i] /= (NSUBJ*(NSUBJ-1))/2
     end
     res
 end

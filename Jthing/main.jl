@@ -25,47 +25,35 @@ function separate(interval::AbstractArray, lim =100)
   end
 end
 
-function main()
+function run_isc(stim::Array{String,1}=["S1","S2","S3","S4"],pref::String="S")
   interval = 1:3620
   const means = [ prep(subj) for subj in 1:NSUBJ ]
   @debug("means done")
-  covs = zeros(Float64, SIZE,NSUBJ*div((NSUBJ-1),2))
+  covs = zeros(Float64, SIZE,div(NSUBJ*(NSUBJ-1),2))
   disps = zeros(Float64, (SIZE,NSUBJ))
-  indexes = [get_indexes(i) for i in 1:NSUBJ]
-  for j in 1:length(indexes[1])
-    local seq = [get_niis(i,indexes[j][1]:indexes[j][2]) for i in 1:NSUBJ]
+  indexes = [get_indexes(i,stim) for i in 1:NSUBJ]
+  for j in 1:size(indexes[1],1)
+    local seq = [get_niis(i,indexes[i][j,1]:indexes[i][j,2]) for i in 1:NSUBJ]
     @debug("Got niis")
-    cov_n!(covs,disps,seq, means,indexes[j][2]-indexes[j][1])
+    cov_n!(covs,disps,seq, means,17)
     @debug("Done with : $j")
   end
   @debug("covs_n done")
-  save("covs.jld", "data", covs)
-  save("disps.jld", "data", disps)
+  save("$pref|covs.jld", "data", covs)
+  save("$pref|disps.jld", "data", disps)
   # niscores = reshape([score(corrs[i,:,:]) for i in 1:size(corrs,1)],SHAPE)
   niscores = ISC_res(covs,disps)
   @info("Scores done")
   cleared = map(x->isnan(x)?0:min(abs(x),1)*sign(x),niscores)
   ni = get_nii(1,1)
   res = NIfTI.NIVolume(ni.header, ni.extensions, reshape(cleared, SHAPE))
-  niwrite("segmentation_result.nii",res)
-  corrs,niscores,disps
+  niwrite("$pref|segmentation_result.nii",res)
+  covs,niscores,disps
 end
 
-@time CS,res,DS = main()
-
-function rema_!(shadow::Float64,variable::Float64,decay::Float64= 0.3)
-    shadow -= (1 - decay) * (shadow - variable)
-end
-
-function smooth(x,decay=0.9)
-  res = copy(x)
-  st = x[1]
-  res[1] = st
-  i = 2
-  for el in x[2:end]
-    st = rema_!(st,el,decay)
-    res[i] = st
-    i+=1
-  end
-  res
-end
+run_isc()
+@debug("S done!")
+run_isc(["V1","V2"],"V")
+@debug("V done!")
+run_isc(["S1","S2","S3","S4","V1","V2"],"S_V")
+@debug("S and V done!")
