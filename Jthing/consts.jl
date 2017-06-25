@@ -1,0 +1,10 @@
+const PATH = "/run/media/ashedko/5cdd1287-7dba-4138-8a1b-91148f9f8ab5/ashedko/UNC/"
+const PATH_Fmt = x -> PATH * string(x) * "/"
+const NSUBJ = 29 # 7 in test runs
+const SIZEX = 91
+const SIZEY = 109
+const SIZEZ = 91
+const SHAPE = (SIZEX,SIZEY,SIZEZ)
+const SIZE = SIZEX * SIZEY * SIZEZ
+const LEN = 3620
+const NEXP = 91
