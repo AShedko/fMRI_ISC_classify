@@ -1,7 +1,8 @@
 using HypothesisTests, HDF5, NIfTI
 using Distributions
-push!(LOAD_PATH, ".")
+push!(LOAD_PATH, @__DIR__)
 using ISCLib
+include("consts.jl")
 
 function TTest(x::AbstractVector, y::AbstractVector, μ0=0)
     nx, ny = length(x), length(y)
@@ -14,7 +15,7 @@ function TTest(x::AbstractVector, y::AbstractVector, μ0=0)
     (nx, ny, xbar, df, stderr, t)
 end
 
-function segment(subj::Int)
+function segment(subj::Int,pref::String)
     sind = get_indexes(subj,["S1","S2"]);
     vind = get_indexes(subj,["V1","V2","V3","V4"]);
     S_seq = vcat([get_niis(subj,sind[i,1]:sind[i,2]) for i =1:size(sind,1)]...);
@@ -31,13 +32,41 @@ function segment(subj::Int)
             pvals[i] = 1
         end
     end
-
-    pvals
     logpvals = -log10.(pvals);
     logpvals[logpvals < 5] = 0
-    # logpvals[logpvals > 20] = 20
     ni = get_nii(1,1)
     res = NIfTI.NIVolume(ni.header, ni.extensions,logpvals) # Cheap, as reshape returns a view
     niwrite("out/$pref|segmentation_result.nii",res)
     logpvals
 end
+
+function segment(pref::String)
+    S_seq = []
+    V_seq = []
+    for subj = 1:NSUBJ
+        sind = get_indexes(subj,["S1","S2"]);
+        vind = get_indexes(subj,["V1","V2","V3","V4"]);
+        S_seq = vcat(S_seq, [get_niis(subj,sind[i,1]:sind[i,2]) for i =1:size(sind,1)]...);
+        V_seq = vcat(V_seq, [get_niis(subj,vind[i,1]:vind[i,2]) for i =1:size(vind,1)]...);
+    end
+    (nx, ny, xbar, df, stderr, t) = TTest(S_seq,V_seq);
+
+    df = (x->isnan(x)?0:x).(df)
+    t = (x->isnan(x)?0:x).(t)
+    pvals = zeros(df)
+    for (i,(df_el,t_el)) = enumerate(zip(df,t))
+        try
+            pvals[i] = pvalue(TDist(df_el),t_el)
+        catch
+            pvals[i] = 1
+        end
+    end
+    logpvals = -log10.(pvals);
+    logpvals[logpvals .< 5.0] = 0
+    ni = get_nii(1,1)
+    res = NIfTI.NIVolume(ni.header, ni.extensions,logpvals) # Cheap, as reshape returns a view
+    niwrite("out/$pref|segmentation_result.nii",res)
+    logpvals
+end
+
+@time segment("tstat_all")

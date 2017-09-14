@@ -1,4 +1,4 @@
-push!(LOAD_PATH, ".");
+push!(LOAD_PATH, @__DIR__)
 
 using ISCLib
 
@@ -17,7 +17,6 @@ function collect_groups(labels)
 end
 
 δ(ind::CartesianIndex) = CartesianRange(ind-1, ind+1)
-δl(ind,l) = [CartesianIndex((ind[1]+l*i,ind[2]+k*j,ind[3]+k*k)) ]
 
 function rndsample(dfr, α::Real=0.2)
     dfr[sample(collect(1:size(dfr, 1)), Int(ceil( α * size(dfr, 1)))), :]
@@ -25,37 +24,38 @@ end
 
 function iscmask(a)
     # load Segmentation
-    mask_S = niread("./out/S|segmentation_result.nii").raw;
-    mask_V = niread("./out/V|segmentation_result.nii").raw;
-    mask_SV = niread("./out/S_V|segmentation_result.nii").raw;
+    mask_S = niread("$(@__DIR__)/out/S|segmentation_result.nii").raw;
+    mask_V = niread("$(@__DIR__)/out/V|segmentation_result.nii").raw;
+    mask_SV = niread("$(@__DIR__)/out/S_V|segmentation_result.nii").raw;
 
-    # mask_W = max(mask_S,mask_V,mask_SV);
-    mask_W = zeros(mask_S)
-    idx = (mask_S.> a) $ (mask_V.> a)
-    mask_W[idx] = mask_SV[idx]
-    mask_W
+    mask_W = max(mask_S,mask_V,mask_SV);
+    # mask_W = zeros(mask_S)
+    # idx = (mask_S.> a) $ (mask_V.> a)
+    # mask_W[idx] = mask_SV[idx]
+    # mask_W
 end
 
 function glmmask(a)
     # load Segmentation
     # mask_W = niread("../../matlab/glm_res/ResMS.nii")
-    mask_1 = niread("../../matlab/glm_res/beta_0001.nii").raw
-    mask_1 /= maximum(mask_1[mask_1.>0])
-    mask_2 = niread("../../matlab/glm_res/beta_0002.nii").raw
-    mask_1 /= maximum(mask_2[mask_2.>0])
+    mask_1 = niread("$(@__DIR__)/../../matlab/glm_res/beta_0001.nii").raw
+    mask_1 = mask_1 ./ maximum(mask_1[mask_1.>0])
+    mask_2 = niread("$(@__DIR__)/../../matlab/glm_res/beta_0002.nii").raw
+    mask_2 = mask_2 ./ maximum(mask_2[mask_2.>0])
     mask_W = max(mask_1,mask_2)
     mask_W
 end
 
 function get_segment(a = .1, b = 0.03, pref="isc")
+    print("in")
     if pref =="isc"
-        mask_W = iscmask()
-    elseif pref == "ttest"
-        mask_W = niread("./out/Tstat|segmentation_result.nii").raw;
+        mask_W = iscmask(a)
+    elseif pref == "ttest" || pref == "tstat_all"
+        mask_W = niread("$(@__DIR__)/out/Tstat|segmentation_result.nii").raw;
     elseif pref == "glm"
         mask_W = glmmask(a)
     end
-    SVd = h5read("./out/S_V|disps.h5", "data");
+    SVd = h5read("$(@__DIR__)/out/S_V|disps.h5", "data");
 
     # Average disps
     SVd = sum(SVd,2);
@@ -63,7 +63,7 @@ function get_segment(a = .1, b = 0.03, pref="isc")
     med = reduce(+,[get_mean(i) for i in 1:NSUBJ])./NSUBJ
     coeff_of_var = reshape(sqrt.(SVd),SHAPE)./med
     coeff_of_var[isnan.(coeff_of_var)] = 0
-    atl = niread("../../Harvard-Oxford\ cortical\ and\ subcortical\ structural\ atlases/HarvardOxford-cort-maxprob-thr0-2mm.nii.gz").raw
+    atl = niread("$(@__DIR__)/../../Harvard-Oxford\ cortical\ and\ subcortical\ structural\ atlases/HarvardOxford-cort-maxprob-thr0-2mm.nii.gz").raw
 
     # Compute mask
     isc_r = copy(mask_W);
@@ -72,14 +72,14 @@ function get_segment(a = .1, b = 0.03, pref="isc")
 
     ni = get_nii(1,1)
     res = NIfTI.NIVolume(ni.header, ni.extensions, isc_r)
-    niwrite("out/$(pref)_r.nii",res)
+    niwrite("$(@__DIR__)/out/$(pref)_r.nii",res)
     # get rid of noise (scanning artifacts have very high CV)
     # normed_cv = coeff_of_var./maximum(coeff_of_var)
 
 
     # get connected components
     labels = label_components(isc_r.>0)
-    groups = filter(x->length(x)>20,collect_groups(labels))
+    groups = filter(x->length(x)>40,collect_groups(labels))
     inds = get_result_inds(isc_r, groups)
     inds
 end
@@ -190,7 +190,7 @@ function extract_data(;a = .4, b = 0.02, rnd = false, pref = "", num = 3,)
 end
 
 # extract_data(a = 0.16, b = 0.03, pref = "isc", num=3)
-# extract_data(a = 40, b = 0.03, pref = "ttest", num=3)
-extract_data(a = 0.5, b = 0.03, pref = "glm", num=3)
+extract_data(a = 40, b = 0.03, pref = "tstat_all", num=3)
+# extract_data(a = 0.16, b = 0.03, pref = "glm", num=3)
 
 # extract_data(rnd = true, pref = "rnd")

@@ -34,7 +34,6 @@ def corr_xyz(L, s1,s2, x, y, z):
 
 
 def ISC_mat_voxel(l, x, y, z, target = range(1,SIZE+1)):
-    NSUBJ = 29
     """
     Correlation in xyz voxel between all subjects
     :param L: Loader
@@ -43,6 +42,7 @@ def ISC_mat_voxel(l, x, y, z, target = range(1,SIZE+1)):
     :param z: 
     :return: 
     """
+    NSUBJ = 29
     X = [np.ndarray(len(target)+1, np.float32) for j in range(NSUBJ+1)]
     for k in range(1,NSUBJ+1):
         i=0

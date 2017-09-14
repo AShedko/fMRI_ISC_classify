@@ -1,4 +1,4 @@
-const PATH = "/run/media/ashedko/5cdd1287-7dba-4138-8a1b-91148f9f8ab5/ashedko/UNC/"
+const PATH = "/run/media/ashedko/_data_/datasets/UNC/"
 const PATH_Fmt = x -> PATH * string(x) * "/"
 const NSUBJ = 29 # 7 in test runs
 const SIZEX = 91
